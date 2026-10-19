@@ -10,8 +10,6 @@ Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/).
 uv sync
 ```
 
-Optional: set `CLIENT_URL` (CORS origin, default `http://localhost:5173`) in a `.env` file.
-
 ## Local run
 
 ```bash
