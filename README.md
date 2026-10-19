@@ -18,7 +18,12 @@ Optional: set `CLIENT_URL` (CORS origin, default `http://localhost:5173`) in a `
 uv run gunicorn -w 2 -b 0.0.0.0:8080 "specs:create_app()" --timeout 180 --log-level=debug
 ```
 
-Server listens on http://localhost:8080. Only route: `GET /refs`.
+Server listens on http://localhost:8080. Check it runs:
+
+```bash
+curl http://localhost:8080/hello
+# {"message":"Hello, the specs server is running"}
+```
 
 ## Dev
 
