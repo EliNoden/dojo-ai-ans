@@ -23,17 +23,3 @@ curl http://localhost:8080/hello
 # {"message":"Hello, the specs server is running"}
 ```
 
-## Dev
-
-Run tests:
-
-```bash
-uv run pytest
-```
-
-Before committing, make sure you run `ruff`.
-
-```bash
-uv run ruff format .
-uv run ruff check --fix
-```
