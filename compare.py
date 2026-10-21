@@ -7,6 +7,7 @@ For each one: temporary detached worktree, `uv sync`, gunicorn "specs:create_app
 free port, bench.run, then the server is killed and the worktree removed.
 """
 
+import contextlib
 import os
 import signal
 import socket
@@ -47,7 +48,7 @@ def wait_until_listening(port: int, server: subprocess.Popen[bytes]) -> None:
     deadline = time.monotonic() + STARTUP_TIMEOUT
     while time.monotonic() < deadline:
         if server.poll() is not None:
-            raise RuntimeError("server exited (no specs:create_app?)")
+            raise RuntimeError("server exited at startup (no specs:create_app?)")
         try:
             socket.create_connection(("127.0.0.1", port), timeout=1).close()
             return
@@ -69,10 +70,11 @@ def bench_commit(root: str, commit: str) -> dict[str, tuple[int, int]]:
             )
             if sync.returncode:
                 last = (sync.stderr or sync.stdout).strip().splitlines()[-1:]
-                raise RuntimeError(f"uv sync failed: {' '.join(last)}")
+                raise RuntimeError(f"uv sync failed: {' '.join(last).strip()}")
             port = free_port()
+            # --preload: a broken app fails before the port is bound, not after
             server = subprocess.Popen(
-                ["uv", "run", "--project", wt, "gunicorn", "-w", "2"]
+                ["uv", "run", "--project", wt, "gunicorn", "-w", "2", "--preload"]
                 + ["-b", f"127.0.0.1:{port}", "specs:create_app()"],
                 cwd=wt,
                 stdout=subprocess.DEVNULL,
@@ -83,7 +85,10 @@ def bench_commit(root: str, commit: str) -> dict[str, tuple[int, int]]:
             return bench.run(f"http://127.0.0.1:{port}", quiet=True)
         finally:
             if server:
-                os.killpg(server.pid, signal.SIGKILL)
+                # the group may already be gone (server died at startup):
+                # ESRCH on Linux, EPERM on macOS
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(server.pid, signal.SIGKILL)
                 server.wait()
             git(root, "worktree", "remove", "--force", wt)
 
