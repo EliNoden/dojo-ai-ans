@@ -127,17 +127,21 @@ def main() -> None:
 
     width = max(len(n) for n in ["branch", *names]) + 3
     print(("branch".ljust(width) + "".join(c.ljust(14) for c in COLUMNS)).rstrip())
-    for name in names:
-        commit = resolve(root, name)
-        if commit is None:
-            row = "ERROR: unknown branch"
-        else:
-            try:
-                score = bench_commit(root, commit)
-                row = "".join(cell(*score[c]).ljust(14) for c in COLUMNS)
-            except RuntimeError as e:
-                row = f"ERROR: {e}"
-        print(name.ljust(width) + row.rstrip(), flush=True)
+    try:
+        for name in names:
+            commit = resolve(root, name)
+            if commit is None:
+                row = "ERROR: unknown branch"
+            else:
+                try:
+                    score = bench_commit(root, commit)
+                    row = "".join(cell(*score[c]).ljust(14) for c in COLUMNS)
+                except RuntimeError as e:
+                    row = f"ERROR: {e}"
+            print(name.ljust(width) + row.rstrip(), flush=True)
+    finally:
+        # a second Ctrl-C can interrupt `worktree remove` and leave a stale entry
+        git(root, "worktree", "prune")
 
 
 if __name__ == "__main__":
