@@ -24,8 +24,12 @@ def create_app() -> Flask:
     def next_version_route() -> Response:
         if not request.is_json:
             abort(415)
+        data = request.get_data()
+        # A chunked body is silently truncated at MAX_CONTENT_LENGTH by Werkzeug;
+        # reading past the limit is what raises 413.
+        request.stream.read(1)
         try:
-            body = json.loads(request.get_data())
+            body = json.loads(data)
         except ValueError, RecursionError:
             abort(400, description="body must be valid JSON")
         if not isinstance(body, dict):
