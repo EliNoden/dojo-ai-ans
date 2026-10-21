@@ -372,7 +372,7 @@ CASES: list[Case] = [
 ]
 
 
-def run(base_url: str, case: Case) -> tuple[bool, str]:
+def run_case(base_url: str, case: Case) -> tuple[bool, str]:
     headers = {"Content-Type": case.content_type} if case.content_type else {}
     try:
         r = requests.request(
@@ -387,6 +387,22 @@ def run(base_url: str, case: Case) -> tuple[bool, str]:
         return False, type(e).__name__
 
 
+def run(base_url: str, quiet: bool = False) -> dict[str, tuple[int, int]]:
+    """Run every case; return (passed, total) per category, plus "total"."""
+    score = {"core": (0, 0), "intent": (0, 0), "hardening": (0, 0)}
+    for case in CASES:
+        ok, detail = run_case(base_url, case)
+        passed, total = score[case.category]
+        score[case.category] = (passed + ok, total + 1)
+        if not ok and not quiet:
+            print(f"FAIL [{case.category}] {case.id}: {detail}")
+    score["total"] = (
+        sum(passed for passed, _ in score.values()),
+        sum(total for _, total in score.values()),
+    )
+    return score
+
+
 def main() -> None:
     base_url = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080").rstrip(
         "/"
@@ -399,23 +415,8 @@ def main() -> None:
         print(f"server not reachable at {base_url}")
         sys.exit(2)
 
-    score: dict[str, list[int]] = {
-        "core": [0, 0],
-        "intent": [0, 0],
-        "hardening": [0, 0],
-    }
-    for case in CASES:
-        ok, detail = run(base_url, case)
-        score[case.category][0] += ok
-        score[case.category][1] += 1
-        if not ok:
-            print(f"FAIL [{case.category}] {case.id}: {detail}")
-
+    score = run(base_url)
     print()
-    score["total"] = [
-        sum(s[0] for s in score.values()),
-        sum(s[1] for s in score.values()),
-    ]
     for name, (passed, total) in score.items():
         print(f"{name}: {passed}/{total} ({100 * passed / total:.1f} %)")
 
