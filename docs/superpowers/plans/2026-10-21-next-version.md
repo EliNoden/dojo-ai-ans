@@ -69,17 +69,17 @@
 - Consumes: `next_version`, `BUMPS` from `versioning`.
 - Produces: `create_app() -> Flask` with `POST /next-version`.
 
-- [ ] **Step 1: Write failing client tests** in `tests/test_api.py` (fixture `client = create_app().test_client()`):
+- [x] **Step 1: Write failing client tests** in `tests/test_api.py` (fixture `client = create_app().test_client()`):
   - nominal: `post("/next-version", json={"tags": ["v1.2.3", "1.0.0"], "bump": "patch"})` → 200, `is_json`, `{"next": "v1.2.4"}`.
   - each exact error message from Global Constraints with status 400, e.g. `data=b"{bad", content_type="application/json"` → `"body must be valid JSON"`; `data=b"\xff\xfe"` → same; `data=b"[" * 100000` → 400 (any message); `json=[]` → `"body must be a JSON object"`; tags `None`/`"1.2.3"`/`[1]`/`[None]`/missing → tags message; bump missing/`"Patch"`/`["patch"]`/`{}`/`1`/`None` → bump message; `[]` tags → empty message; invalid tags message.
   - `data="x", content_type="text/plain"` → 415 JSON; `json={"tags": ["1.2.3"] * 200000, "bump": "patch"}` (>1 MiB) → 413 JSON; `get("/next-version")` → 405 JSON with `"POST" in headers["Allow"]`; `get("/nope")` → 404 JSON.
-- [ ] **Step 2: Run** → FAIL (404 on route).
-- [ ] **Step 3: Implement** in `specs.py`: `app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024`;
+- [x] **Step 2: Run** → FAIL (404 on route).
+- [x] **Step 3: Implement** in `specs.py`: `app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024`;
   `@app.errorhandler(HTTPException)` returning `jsonify(error=e.description)`, `e.code`, and `e.get_headers()` minus Content-Type (keeps `Allow`).
   Route: `if not request.is_json: abort(415)`; `body = request.get_json(silent=True)` — but distinguish malformed from `null`: use `json.loads(request.get_data())` in try/except `(ValueError, RecursionError)` → 400 `"body must be valid JSON"` (`get_data` raises 413 itself). Then type checks in spec order, `try: next_version(...) except ValueError as e: 400 str(e)`.
   Helper `bad_request(msg)` = `abort(400, description=msg)` via the global handler. Narrow `bump` with `bump not in BUMPS` then `cast(Bump, bump)` (comment why).
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Real-server test** `tests/test_server.py`: module fixture starts `werkzeug.serving.make_server("127.0.0.1", 0, create_app())` in a thread, uses `urllib.request` to assert nominal 200 + `{"next": ...}` and one 400 (invalid tags) + one 415, checking `Content-Type: application/json`. Shut down in teardown.
-- [ ] **Step 6: Quality gates** — `uv run pytest`, ruff, mypy, mutmut (still zero survivors).
-- [ ] **Step 7: README** — document `POST /next-version` with a curl example and the dev commands.
-- [ ] **Step 8: Commit** `feat: add POST /next-version route`.
+- [x] **Step 4: Run** → PASS.
+- [x] **Step 5: Real-server test** `tests/test_server.py`: module fixture starts `werkzeug.serving.make_server("127.0.0.1", 0, create_app())` in a thread, uses `urllib.request` to assert nominal 200 + `{"next": ...}` and one 400 (invalid tags) + one 415, checking `Content-Type: application/json`. Shut down in teardown.
+- [x] **Step 6: Quality gates** — `uv run pytest`, ruff, mypy, mutmut (still zero survivors).
+- [x] **Step 7: README** — document `POST /next-version` with a curl example and the dev commands.
+- [x] **Step 8: Commit** `feat: add POST /next-version route`.
