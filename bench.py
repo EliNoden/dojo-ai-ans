@@ -13,14 +13,18 @@ import requests
 JSON = "application/json"
 
 
+def as_json(payload: object) -> bytes:
+    return json.dumps(payload).encode()
+
+
 class Case(NamedTuple):
     id: str
     category: str  # core | intent | hardening
-    method: str
-    path: str
-    data: bytes | None
-    content_type: str | None
     check: Callable[[requests.Response], bool]
+    data: bytes | None = None
+    content_type: str | None = JSON
+    method: str = "POST"
+    path: str = "/next-version"
 
 
 def body(r: requests.Response) -> object:
@@ -30,29 +34,21 @@ def body(r: requests.Response) -> object:
         return None
 
 
-def post(
-    id: str, category: str, payload: object, check: Callable[[requests.Response], bool]
-) -> Case:
-    return Case(
-        id, category, "POST", "/next-version", json.dumps(payload).encode(), JSON, check
-    )
-
-
 def next_is(id: str, category: str, tags: list[str], bump: str, expected: str) -> Case:
-    return post(
+    return Case(
         id,
         category,
-        {"tags": tags, "bump": bump},
         lambda r: r.status_code == 200 and body(r) == {"next": expected},
+        as_json({"tags": tags, "bump": bump}),
     )
 
 
 def error_is(id: str, tags: list[str], bump: str, message: str) -> Case:
-    return post(
+    return Case(
         id,
         "intent",
-        {"tags": tags, "bump": bump},
         lambda r: r.status_code == 400 and body(r) == {"error": message},
+        as_json({"tags": tags, "bump": bump}),
     )
 
 
@@ -63,21 +59,29 @@ def is_4xx(r: requests.Response) -> bool:
 
 def has_error_body(r: requests.Response) -> bool:
     b = body(r)
-    return isinstance(b, dict) and isinstance(b.get("error"), str)
+    return (
+        400 <= r.status_code < 500
+        and isinstance(b, dict)
+        and isinstance(b.get("error"), str)
+    )
 
 
 def status_and_error(status: int) -> Callable[[requests.Response], bool]:
     return lambda r: r.status_code == status and has_error_body(r)
 
 
+# Smallest valid request; NOMINAL_NEXT is its expected answer (["v1.0.0"] + patch).
+NOMINAL = as_json({"tags": ["v1.0.0"], "bump": "patch"})
+NOMINAL_NEXT = {"next": "v1.0.1"}
+
+
 def same_twice(r: requests.Response) -> bool:
     again = requests.Session().send(r.request, timeout=10)
-    return body(r) == body(again) == {"next": "v1.0.1"}
+    return body(r) == body(again) == NOMINAL_NEXT
 
 
 NINES_1000 = "9" * 1000
 NINES_1001 = "9" * 1001
-NOMINAL = b'{"tags": ["v1.0.0"], "bump": "patch"}'
 
 # Valid next-version cases. Sources: tt = tests/test_test.py, tv = tests/test_versions.py,
 # api = tests/test_next_version_api.py. "-rewritten": the test_test.py expectation contradicted
@@ -101,22 +105,28 @@ NEXT = [
     ),
     (
         "tt-prerelease-patch-same",
-        "core",
+        "intent",
         ["v1.10.0", "v1.10.1-rc.1"],
         "patch",
         "v1.10.1",
     ),
     (
         "tt-prerelease-minor-same",
-        "core",
+        "intent",
         ["v1.10.0", "v1.11.0-beta.2"],
         "minor",
         "v1.11.0",
     ),
-    ("tt-prerelease-major-same", "core", ["v1.0.0", "v2.0.0-rc.1"], "major", "v2.0.0"),
+    (
+        "tt-prerelease-major-same",
+        "intent",
+        ["v1.0.0", "v2.0.0-rc.1"],
+        "major",
+        "v2.0.0",
+    ),
     (
         "tt-prerelease-below-release",
-        "core",
+        "intent",
         ["v1.0.0-rc.1", "v1.0.0"],
         "patch",
         "v1.0.1",
@@ -152,7 +162,8 @@ NEXT = [
     ),
     ("tv-prefixed", "core", ["v1.2.3"], "patch", "v1.2.4"),
     ("api-nominal", "core", ["v1.2.3", "v1.10.0", "v1.9.1"], "minor", "v1.11.0"),
-    # intent: product choices of docs/specs/next-version.md
+    # intent: product choices of docs/specs/next-version.md. Pre-releases are all here: a naive
+    # bump_*() or rejecting pre-releases (both reasonable readings) changes the answer.
     (
         "tt-prerelease-counted-rewritten",
         "intent",
@@ -191,18 +202,11 @@ NEXT = [
     ("tv-build-only-differs", "intent", ["1.2.0+a", "1.2.0+b"], "patch", "1.2.1"),
 ]
 
-# Deterministic sample for the property "next > every tag" (release-only, v-prefixed):
-# (tags, next major, next minor, next patch)
+# Deterministic sample for the property "next > every tag" (release-only, v-prefixed), on lists
+# a lexical sort gets wrong: (tags, next major, next minor, next patch)
 GREATER = [
-    (["v0.0.1"], "v1.0.0", "v0.1.0", "v0.0.2"),
-    (["v0.1.0", "v0.0.9"], "v1.0.0", "v0.2.0", "v0.1.1"),
     (["v3.2.1", "v3.10.0", "v3.9.9"], "v4.0.0", "v3.11.0", "v3.10.1"),
     (["v10.0.0", "v9.99.99"], "v11.0.0", "v10.1.0", "v10.0.1"),
-    (["v1.0.0", "v1.0.1", "v1.0.2"], "v2.0.0", "v1.1.0", "v1.0.3"),
-    (["v2.5.0", "v2.4.10", "v1.50.0"], "v3.0.0", "v2.6.0", "v2.5.1"),
-    (["v0.0.0", "v0.0.0"], "v1.0.0", "v0.1.0", "v0.0.1"),
-    (["v7.0.7", "v7.7.0", "v0.7.7"], "v8.0.0", "v7.8.0", "v7.7.1"),
-    (["v50.50.50", "v49.0.0"], "v51.0.0", "v50.51.0", "v50.50.51"),
     (["v12.3.4", "v12.3.40", "v12.30.4"], "v13.0.0", "v12.31.0", "v12.30.5"),
 ]
 
@@ -264,7 +268,6 @@ INVALID_TAG_ERRORS = [
     ("tt-empty-patch-rewritten", [], "patch", "tags must not be empty"),
     ("tt-empty-minor-rewritten", [], "minor", "tags must not be empty"),
     ("tt-empty-major-rewritten", [], "major", "tags must not be empty"),
-    ("tv-empty", [], "patch", "tags must not be empty"),
     (
         "tv-invalid-listed-in-order",
         ["latest", "1.2.3", "V1.2.3", "vv1.2.3", " 1.2.3"],
@@ -272,42 +275,40 @@ INVALID_TAG_ERRORS = [
         "invalid tags: latest, V1.2.3, vv1.2.3,  1.2.3",
     ),
     ("api-invalid-tag", ["1.2.3", "latest"], "patch", "invalid tags: latest"),
-    ("api-empty", [], "patch", "tags must not be empty"),
 ]
 
 
-def as_json(payload: object) -> bytes:
-    return json.dumps(payload).encode()
+# Invalid inputs (core): any reasonable implementation answers 4xx, never 5xx.
+INVALID_INPUTS = {
+    "tt-bump-absent": as_json({"tags": ["v1.0.0"]}),
+    "tt-bump-unknown": as_json({"tags": ["v1.0.0"], "bump": "huge"}),
+    "tt-bump-uppercase": as_json({"tags": ["v1.0.0"], "bump": "MAJOR"}),
+    "tt-bump-space": as_json({"tags": ["v1.0.0"], "bump": " patch"}),
+    "tt-bump-null": as_json({"tags": ["v1.0.0"], "bump": None}),
+    "tt-bump-list": as_json({"tags": ["v1.0.0"], "bump": ["patch"]}),
+    "tt-tags-absent": as_json({"bump": "patch"}),
+    "tt-tags-string": as_json({"tags": "v1.0.0", "bump": "patch"}),
+    "tt-tags-int-item": as_json({"tags": [1, "v1.0.0"], "bump": "patch"}),
+    "tt-tags-null": as_json({"tags": None, "bump": "patch"}),
+    "tt-tags-nested-list": as_json({"tags": [["v1.0.0"]], "bump": "patch"}),
+    "tt-tags-bool-item": as_json({"tags": [True], "bump": "patch"}),
+    "tt-broken-json": b"{not json",
+    "tt-empty-body": b"",
+    "tt-null-body": b"null",
+    "tt-non-utf8-body": b"\xff\xfe",
+    "tt-array-body": as_json(["v1.0.0"]),
+    "tt-nested-100000": b"[" * 100_000 + b"]" * 100_000,
+    "api-bump-capitalized": as_json({"tags": ["1.2.3"], "bump": "Patch"}),
+}
 
-
-# Invalid inputs: (id, raw body, content type). Core expects 4xx, hardening a JSON {"error": str}.
-INVALID_INPUTS = [
-    ("tt-bump-absent", as_json({"tags": ["v1.0.0"]})),
-    ("tt-bump-unknown", as_json({"tags": ["v1.0.0"], "bump": "huge"})),
-    ("tt-bump-uppercase", as_json({"tags": ["v1.0.0"], "bump": "MAJOR"})),
-    ("tt-bump-space", as_json({"tags": ["v1.0.0"], "bump": " patch"})),
-    ("tt-bump-null", as_json({"tags": ["v1.0.0"], "bump": None})),
-    ("tt-bump-list", as_json({"tags": ["v1.0.0"], "bump": ["patch"]})),
-    ("tt-tags-absent", as_json({"bump": "patch"})),
-    ("tt-tags-string", as_json({"tags": "v1.0.0", "bump": "patch"})),
-    ("tt-tags-int-item", as_json({"tags": [1, "v1.0.0"], "bump": "patch"})),
-    ("tt-tags-null", as_json({"tags": None, "bump": "patch"})),
-    ("tt-tags-nested-list", as_json({"tags": [["v1.0.0"]], "bump": "patch"})),
-    ("tt-tags-bool-item", as_json({"tags": [True], "bump": "patch"})),
-    ("tt-broken-json", b"{not json"),
-    ("tt-empty-body", b""),
-    ("tt-null-body", b"null"),
-    ("tt-non-utf8-body", b"\xff\xfe"),
-    ("tt-array-body", as_json(["v1.0.0"])),
-    ("tt-nested-100000", b"[" * 100_000 + b"]" * 100_000),
-    ("api-tags-absent", as_json({"bump": "patch"})),
-    ("api-tags-string", as_json({"tags": "1.2.3", "bump": "patch"})),
-    ("api-tags-int-item", as_json({"tags": [1, "1.2.3"], "bump": "patch"})),
-    ("api-bump-absent", as_json({"tags": ["1.2.3"]})),
-    ("api-bump-capitalized", as_json({"tags": ["1.2.3"], "bump": "Patch"})),
-    ("api-array-body", as_json([])),
-    ("api-non-json-body", b"not json"),
-]
+# Hardening: a few representative bad inputs must answer a JSON {"error": str}.
+ERROR_BODY_INPUTS = {
+    "bad-bump": INVALID_INPUTS["tt-bump-unknown"],
+    "bad-tags-type": INVALID_INPUTS["tt-tags-string"],
+    "broken-json": INVALID_INPUTS["tt-broken-json"],
+    "array-body": INVALID_INPUTS["tt-array-body"],
+    "invalid-tag": as_json({"tags": ["v1.0.0", "latest"], "bump": "patch"}),
+}
 
 CASES: list[Case] = [
     *(next_is(id, cat, tags, bump, expected) for id, cat, tags, bump, expected in NEXT),
@@ -320,124 +321,53 @@ CASES: list[Case] = [
         error_is(id, tags, bump, message)
         for id, tags, bump, message in INVALID_TAG_ERRORS
     ),
+    *(Case(f"{id}-4xx", "core", is_4xx, data) for id, data in INVALID_INPUTS.items()),
     *(
-        Case(f"{id}-4xx", "core", "POST", "/next-version", data, JSON, is_4xx)
-        for id, data in INVALID_INPUTS
+        Case(f"{id}-error-body", "hardening", has_error_body, data)
+        for id, data in ERROR_BODY_INPUTS.items()
     ),
-    *(
-        Case(
-            f"{id}-error-body",
-            "hardening",
-            "POST",
-            "/next-version",
-            data,
-            JSON,
-            has_error_body,
-        )
-        for id, data in INVALID_INPUTS
-    ),
-    Case(
-        "identical-calls-same-body",
-        "core",
-        "POST",
-        "/next-version",
-        NOMINAL,
-        JSON,
-        same_twice,
-    ),
+    Case("identical-calls-same-body", "core", same_twice, NOMINAL),
     Case(
         "response-is-json-with-next",
         "core",
-        "POST",
-        "/next-version",
-        NOMINAL,
-        JSON,
         lambda r: (
             r.headers.get("Content-Type", "").startswith(JSON)
             and isinstance(body(r), dict)
             and "next" in body(r)
         ),
+        NOMINAL,
     ),
     Case(
         "charset-utf8-accepted",
         "core",
-        "POST",
-        "/next-version",
+        lambda r: body(r) == NOMINAL_NEXT,
         NOMINAL,
         "application/json; charset=utf-8",
-        lambda r: body(r) == {"next": "v1.0.1"},
     ),
     Case(
         "get-405-allow-post",
         "core",
-        "GET",
-        "/next-version",
-        None,
-        None,
         lambda r: r.status_code == 405 and "POST" in r.headers.get("Allow", ""),
+        method="GET",
     ),
-    Case(
-        "get-405-json",
-        "hardening",
-        "GET",
-        "/next-version",
-        None,
-        None,
-        status_and_error(405),
-    ),
-    Case(
-        "unknown-route-404-json",
-        "hardening",
-        "POST",
-        "/nope",
-        None,
-        None,
-        status_and_error(404),
-    ),
-    Case(
-        "old-route-404-json",
-        "hardening",
-        "POST",
-        "/refs/next",
-        None,
-        None,
-        status_and_error(404),
-    ),
-    Case(
-        "no-content-type-415",
-        "hardening",
-        "POST",
-        "/next-version",
-        NOMINAL,
-        None,
-        status_and_error(415),
-    ),
-    Case(
-        "text-plain-415",
-        "hardening",
-        "POST",
-        "/next-version",
-        NOMINAL,
-        "text/plain",
-        status_and_error(415),
-    ),
+    # hardening: rarely asked, about half of the category
+    Case("get-405-json", "hardening", status_and_error(405), method="GET"),
+    Case("unknown-route-404-json", "hardening", status_and_error(404), path="/nope"),
+    Case("old-route-404-json", "hardening", status_and_error(404), path="/refs/next"),
+    Case("no-content-type-415", "hardening", status_and_error(415), NOMINAL, None),
+    Case("text-plain-415", "hardening", status_and_error(415), NOMINAL, "text/plain"),
     Case(
         "form-415",
         "hardening",
-        "POST",
-        "/next-version",
+        status_and_error(415),
         NOMINAL,
         "application/x-www-form-urlencoded",
-        status_and_error(415),
     ),
     Case(
         "body-over-1mb-413",
         "hardening",
-        "POST",
-        "/next-version",
-        as_json({"tags": ["x" * 1024 * 1024], "bump": "patch"}),
-        JSON,
         status_and_error(413),
+        as_json({"tags": ["x" * 1024 * 1024], "bump": "patch"}),
     ),
 ]
 
@@ -465,7 +395,7 @@ def main() -> None:
     assert len(ids) == len(set(ids)), "duplicate case ids"
     try:
         requests.get(base_url, timeout=5)
-    except requests.ConnectionError:
+    except requests.RequestException:
         print(f"server not reachable at {base_url}")
         sys.exit(2)
 
