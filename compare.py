@@ -1,8 +1,9 @@
 """Bench several iterations side by side.
 
-Usage: uv run --with requests python compare.py [REF ...]   (default: every origin/feat/prompt-*)
+Usage: uv run --with requests python compare.py [REF ...]
+(default: every local and origin branch except main, bench, feat/claude-skills)
 
-Each REF is looked up as origin/REF first, then as any git ref (local branch, commit).
+Each REF is looked up as a local ref first (branch, commit), then as origin/REF.
 For each one: temporary detached worktree, `uv sync`, gunicorn "specs:create_app()" on a
 free port, bench.run, then the server is killed and the worktree removed.
 """
@@ -19,6 +20,8 @@ import time
 import bench
 
 COLUMNS = ["core", "intent", "hardening", "total"]
+# not iterations; "origin" is how origin/HEAD shows up in for-each-ref
+EXCLUDED = {"main", "bench", "feat/claude-skills", "origin", "HEAD"}
 STARTUP_TIMEOUT = 20  # seconds
 
 
@@ -29,7 +32,7 @@ def git(root: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def resolve(root: str, name: str) -> str | None:
-    for ref in (f"origin/{name}", name):
+    for ref in (name, f"origin/{name}"):
         found = git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
         if found.returncode == 0:
             return found.stdout.strip()
@@ -112,17 +115,21 @@ def main() -> None:
     git(root, "worktree", "prune")
     if git(root, "fetch", "origin").returncode:
         print("warning: git fetch origin failed, using local refs", file=sys.stderr)
-    names = sys.argv[1:] or [
-        ref.removeprefix("origin/")
-        for ref in git(
-            root,
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/remotes/origin/feat/prompt-*",
-        ).stdout.split()
-    ]
+    names = sys.argv[1:] or sorted(
+        {
+            ref.removeprefix("origin/")
+            for ref in git(
+                root,
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads",
+                "refs/remotes/origin",
+            ).stdout.split()
+        }
+        - EXCLUDED
+    )
     if not names:
-        print("no origin/feat/prompt-* branches found")
+        print("no iteration branches found")
         sys.exit(1)
 
     width = max(len(n) for n in ["branch", *names]) + 3

@@ -31,12 +31,12 @@ Exit code is 0 whenever the server answers (it's a score, not a gate) and 2 when
 
 ```bash
 # on branch bench, anywhere in the repo
-uv run --with requests python compare.py                        # every origin/feat/prompt-*
+uv run --with requests python compare.py                        # every branch except main, bench, feat/claude-skills
 uv run --with requests python compare.py feat/prompt-1 6758752  # explicit refs
 ```
 
-Each argument is looked up as `origin/<arg>` first, then as any git ref (local branch, commit), so an iteration can be benched without pushing. For each one: `git fetch origin`, temporary detached worktree, `uv sync`, gunicorn on a free port, bench, then the server is killed and the worktree removed (also on Ctrl-C).
+With no argument it benches every local and `origin/` branch (deduplicated by name) except `main`, `bench` and `feat/claude-skills`. Each argument is looked up as a local git ref first (branch, commit), then as `origin/<arg>`, so an iteration can be benched without pushing. For each one: `git fetch origin`, temporary detached worktree, `uv sync`, gunicorn on a free port, bench, then the server is killed and the worktree removed (also on Ctrl-C).
 
-Output: one row per ref, `passed/total pct%` for `core`, `intent`, `hardening` and `total`. A ref that is unknown, fails `uv sync` or whose server doesn't listen within 20 s gets an `ERROR: <reason>` row; the others still run. With no argument and no `origin/feat/prompt-*` branch, it prints `no origin/feat/prompt-* branches found` and exits 1.
+Output: one row per ref, `passed/total pct%` for `core`, `intent`, `hardening` and `total`. A ref that is unknown, fails `uv sync` or whose server doesn't listen within 20 s gets an `ERROR: <reason>` row; the others still run. With no argument and no iteration branch, it prints `no iteration branches found` and exits 1.
 
 Contract for an iteration to be comparable: dependencies managed with `uv` (gunicorn included) and a Flask factory at `specs:create_app()`.
