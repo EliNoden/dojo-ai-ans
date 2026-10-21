@@ -27,3 +27,7 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Mutation testing
+mutants/
+.mutmut-cache
