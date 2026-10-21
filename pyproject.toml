@@ -11,9 +11,27 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.170.5",
+    "mutmut>=3.8.0",
+    "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.17.1",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+files = ["versions.py", "specs.py", "tests"]
+exclude = ["mutants/"]
+
+[tool.mutmut]
+source_paths = ["versions.py"]
+# only the pure-logic tests: route/live-server tests (deep nesting, gunicorn)
+# are slow and do not exercise versions.py beyond what these tests cover
+pytest_add_cli_args_test_selection = [
+    "tests/test_versions.py",
+    "tests/test_properties.py",
+]

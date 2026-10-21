@@ -20,6 +20,8 @@ instance/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.hypothesis/
+mutants/
 .coverage
 htmlcov/
 
