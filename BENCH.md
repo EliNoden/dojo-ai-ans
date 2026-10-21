@@ -9,7 +9,8 @@ Scores any implementation of `POST /next-version` over HTTP, so iterations (ligh
 ## Categories
 
 - `core` (54 cases): same result under any reasonable reading of the contract (basic bumps, numeric sort, build metadata, big numbers up to 1001 digits, a fixed sample of "next > every tag", invalid input → 4xx and never 5xx including JSON nested 100 000 levels deep, `405` with `Allow`). Measures the effect of tooling (TDD, CLAUDE.md).
-- `intent` (36 cases): product choices of `docs/specs/next-version.md` (optional `v`, prefix of the max, tie → `v`, pre-releases counted with SemVer precedence and `semver` bump, `invalid tags: ...` and `tags must not be empty` errors). Measures the effect of specs. Ids ending in `-rewritten` are `tests/test_test.py` cases whose expectation was recomputed to match the spec.
+- `intent` (69 cases): product choices of `docs/specs/next-version.md` (optional `v`, prefix of the max, tie → `v`, pre-releases counted with SemVer precedence and `semver` bump, `invalid tags: ...` and `tags must not be empty` errors). Measures the effect of specs. Ids ending in `-rewritten` are `tests/test_test.py` cases whose expectation was recomputed to match the spec.
+- Core ignores a leading `v` on `next` (computing right is core, keeping the prefix is a product choice); prefix preservation is measured in intent by a `<core-id>-v-prefix` twin of each core case that compares `next` (33 twins).
 - `hardening` (12 cases): HTTP robustness rarely asked for (5 representative bad inputs answer JSON `{"error": str}`; 404/405 in JSON, 415 on missing/`text/plain`/form Content-Type, 413 on a body over 1 MB). Measures whether the agent thinks of it alone.
 
 ## Run

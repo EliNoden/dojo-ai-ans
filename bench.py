@@ -34,11 +34,42 @@ def body(r: requests.Response) -> object:
         return None
 
 
+def has_next(r: requests.Response, expected: str, exact: bool) -> bool:
+    """Body is {"next": expected}; unless exact, a leading "v" is ignored on both sides."""
+    b = body(r)
+    if not exact and isinstance(b, dict) and isinstance(b.get("next"), str):
+        b = {**b, "next": b["next"].removeprefix("v")}
+        expected = expected.removeprefix("v")
+    return b == {"next": expected}
+
+
 def next_is(id: str, category: str, tags: list[str], bump: str, expected: str) -> Case:
     return Case(
         id,
         category,
-        lambda r: r.status_code == 200 and body(r) == {"next": expected},
+        lambda r: r.status_code == 200 and has_next(r, expected, exact=True),
+        as_json({"tags": tags, "bump": bump}),
+    )
+
+
+Check = Callable[[requests.Response], bool]
+
+
+def with_twin(
+    id: str, check: Callable[[bool], Check], data: bytes, content_type: str = JSON
+) -> list[Case]:
+    """Core case ignoring the "v" prefix of `next`, plus its `-v-prefix` intent twin
+    requiring it kept (check(exact) builds the check)."""
+    return [
+        Case(id, "core", check(False), data, content_type),
+        Case(f"{id}-v-prefix", "intent", check(True), data, content_type),
+    ]
+
+
+def core_next(id: str, tags: list[str], bump: str, expected: str) -> list[Case]:
+    return with_twin(
+        id,
+        lambda exact: lambda r: r.status_code == 200 and has_next(r, expected, exact),
         as_json({"tags": tags, "bump": bump}),
     )
 
@@ -72,12 +103,15 @@ def status_and_error(status: int) -> Callable[[requests.Response], bool]:
 
 # Smallest valid request; NOMINAL_NEXT is its expected answer (["v1.0.0"] + patch).
 NOMINAL = as_json({"tags": ["v1.0.0"], "bump": "patch"})
-NOMINAL_NEXT = {"next": "v1.0.1"}
+NOMINAL_NEXT = "v1.0.1"
 
 
-def same_twice(r: requests.Response) -> bool:
-    again = requests.Session().send(r.request, timeout=10)
-    return body(r) == body(again) == NOMINAL_NEXT
+def same_twice(exact: bool) -> Check:
+    def check(r: requests.Response) -> bool:
+        again = requests.Session().send(r.request, timeout=10)
+        return has_next(r, NOMINAL_NEXT, exact) and body(r) == body(again)
+
+    return check
 
 
 NINES_1000 = "9" * 1000
@@ -311,11 +345,21 @@ ERROR_BODY_INPUTS = {
 }
 
 CASES: list[Case] = [
-    *(next_is(id, cat, tags, bump, expected) for id, cat, tags, bump, expected in NEXT),
+    # core cases comparing `next` ignore its "v" prefix; keeping it is scored by the twin
     *(
-        next_is(f"greater-{i}-{bump}", "core", tags, bump, expected)
+        case
+        for id, cat, tags, bump, expected in NEXT
+        for case in (
+            core_next(id, tags, bump, expected)
+            if cat == "core"
+            else [next_is(id, cat, tags, bump, expected)]
+        )
+    ),
+    *(
+        case
         for i, (tags, *nexts) in enumerate(GREATER)
         for bump, expected in zip(("major", "minor", "patch"), nexts)
+        for case in core_next(f"greater-{i}-{bump}", tags, bump, expected)
     ),
     *(
         error_is(id, tags, bump, message)
@@ -326,7 +370,7 @@ CASES: list[Case] = [
         Case(f"{id}-error-body", "hardening", has_error_body, data)
         for id, data in ERROR_BODY_INPUTS.items()
     ),
-    Case("identical-calls-same-body", "core", same_twice, NOMINAL),
+    *with_twin("identical-calls-same-body", same_twice, NOMINAL),
     Case(
         "response-is-json-with-next",
         "core",
@@ -337,10 +381,9 @@ CASES: list[Case] = [
         ),
         NOMINAL,
     ),
-    Case(
+    *with_twin(
         "charset-utf8-accepted",
-        "core",
-        lambda r: body(r) == NOMINAL_NEXT,
+        lambda exact: lambda r: has_next(r, NOMINAL_NEXT, exact),
         NOMINAL,
         "application/json; charset=utf-8",
     ),
